@@ -62,3 +62,31 @@ Started: 2026-03-28
   - Redis 必须保持 optional；否则会破坏“任何环境都能启动”的部署目标。
   - 政府和商业 API 的真实联网验收常常受第三方配额、认证和地域网络限制，代码闭环和外部凭据验收要明确区分。
 ---
+
+## 2026-03-28 19:10 - MCP 挂载摘要优化
+- What was implemented
+  - 在 MCP `initialize` 响应中新增短摘要 `instructions`，只返回推荐入口和能力域计数。
+  - 新增 `resources/list` / `resources/read` 的能力摘要资源：`mcp-prism://capability-summary`。
+  - 补充测试，约束初始化摘要保持短小，避免撑大 Agent 上下文。
+- Files changed
+  - `src/mcp.rs`
+  - `src/server.rs`
+  - `README.md`
+  - `docs/api/unified-search.md`
+- Learnings for future iterations
+  - 挂载阶段的摘要必须保持“短索引、长详情按需读取”的分层，否则很容易抵消 wrapper 的上下文收益。
+---
+
+## 2026-03-28 19:40 - MCP 摘要二次压缩与自适应
+- What was implemented
+  - 将初始化摘要进一步压缩为单行短说明。
+  - 新增中英文双版本摘要资源：`mcp-prism://capability-summary/en` 与 `mcp-prism://capability-summary/zh`。
+  - 初始化摘要支持根据 `Accept-Language`、`_meta.mcpPrism.language`、`_meta.mcpPrism.preferredDomain` 和 `clientInfo.name` 自适应选择语言与重点能力域。
+- Files changed
+  - `src/mcp.rs`
+  - `src/server.rs`
+  - `README.md`
+  - `docs/api/unified-search.md`
+- Learnings for future iterations
+  - 自适应摘要只能突出“当前真实可用”的能力，不能因为 domain hint 而虚报一个不可用 provider 组。
+---

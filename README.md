@@ -151,6 +151,42 @@ MCP Prism 当前支持四种传输：
 - SSE：`GET /mcp/sse`
 - stdio：`mcp-prism stdio`
 
+在 Agent 挂载时，MCP Prism 还会主动返回一个**短索引摘要**：
+
+- 放在 `initialize.instructions`
+- 内容只保留“推荐怎么用 + 当前可用能力域 + 各域数量”
+- 不展开长篇 provider 细节，避免撑大模型上下文
+- 自动按客户端和语言偏好输出中英文短版本
+- 可根据客户端提供的 domain hint 优先突出某类能力
+
+如果客户端需要更细的说明，可再按需读取：
+
+- `resources/read`
+- 资源 URI：
+  - `mcp-prism://capability-summary/en`
+  - `mcp-prism://capability-summary/zh`
+
+如果你的客户端支持在 `initialize` 时附加自定义 hint，可以传：
+
+```json
+{
+  "_meta": {
+    "mcpPrism": {
+      "language": "zh-CN",
+      "preferredDomain": "coding"
+    }
+  }
+}
+```
+
+可用的 `preferredDomain` 示例：
+
+- `coding`
+- `research`
+- `finance`
+- `maps`
+- `government`
+
 ### 场景 A：服务和 Agent 在同一台机器
 
 这种情况下最简单，直接让客户端用 `stdio` 启动：

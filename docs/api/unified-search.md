@@ -137,6 +137,43 @@ MCP Prism 1.0 MVP 暴露一组统一 HTTP API 和一个 MCP JSON-RPC 入口。�
   - `ping`
   - `tools/list`
   - `tools/call`
+  - `resources/list`
+  - `resources/read`
+
+`initialize` 会返回一个**短摘要**放在 `instructions` 字段中，用于在 Agent 挂载时快速告知：
+
+- 优先使用 `unified_search`
+- 当前有哪些能力域可用
+- 每个能力域大概有多少上游 provider
+
+这个摘要刻意保持简短，避免无意义挤占模型上下文。
+
+摘要行为：
+
+- 自动根据 `Accept-Language` 或初始化参数中的语言 hint 输出中英文
+- 自动根据客户端类型和可选的 `preferredDomain` hint 调整重点能力域
+- 仍然只返回短索引，不返回长说明
+
+更完整的摘要通过资源读取：
+
+- `mcp-prism://capability-summary/en`
+- `mcp-prism://capability-summary/zh`
+- `mcp-prism://provider-catalog`
+
+可选 hint 示例：
+
+```json
+{
+  "protocolVersion": "2025-11-25",
+  "clientInfo": { "name": "Cursor", "version": "1.0" },
+  "_meta": {
+    "mcpPrism": {
+      "language": "zh-CN",
+      "preferredDomain": "coding"
+    }
+  }
+}
+```
 
 当前工具：
 

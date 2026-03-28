@@ -26,7 +26,10 @@ use crate::{
     auth::{RevocationRegistry, SecretCipher, WrappedApiKeyClaims, WrappedApiKeyService},
     config::AppConfig,
     error::{AppError, AppResult},
-    mcp::{JsonRpcRequest, JsonRpcResponse, tool_definitions},
+    mcp::{
+        JsonRpcRequest, JsonRpcResponse, capability_summary_resource_list,
+        capability_summary_resource_read, initialize_instructions, tool_definitions,
+    },
     models::{HealthSnapshot, UnifiedSearchRequest},
     service::SearchService,
 };
@@ -141,7 +144,9 @@ pub async fn run_stdio(mut config: AppConfig) -> AppResult<()> {
             }
         };
 
-        if let Some(response) = process_jsonrpc_request(&runtime, &revocations, request).await? {
+        if let Some(response) =
+            process_jsonrpc_request(&runtime, &revocations, request, None).await?
+        {
             stdout
                 .write_all(format!("{}\n", serde_json::to_string(&response)?).as_bytes())
                 .await
@@ -339,7 +344,7 @@ async fn mcp_endpoint(
     Json(request): Json<JsonRpcRequest>,
 ) -> impl IntoResponse {
     match authorize(&headers, &state).await {
-        Ok(_claims) => match handle_mcp_request(&state, request).await {
+        Ok(_claims) => match handle_mcp_request(&state, request, language_hint(&headers)).await {
             Ok(Some(response)) => (StatusCode::OK, Json(response)).into_response(),
             Ok(None) => StatusCode::NO_CONTENT.into_response(),
             Err(error) => (
@@ -402,7 +407,7 @@ async fn mcp_sse_message(
     Json(request): Json<JsonRpcRequest>,
 ) -> AppResult<StatusCode> {
     let _claims = authorize(&headers, &state).await?;
-    if let Some(response) = handle_mcp_request(&state, request).await? {
+    if let Some(response) = handle_mcp_request(&state, request, language_hint(&headers)).await? {
         state.sse_hub.send(&session_id, response).await?;
     }
     Ok(StatusCode::ACCEPTED)
@@ -416,7 +421,7 @@ async fn handle_websocket(mut socket: WebSocket, state: SharedState) {
         match message {
             Message::Text(text) => {
                 let response = match serde_json::from_str::<JsonRpcRequest>(&text) {
-                    Ok(request) => handle_mcp_request(&state, request)
+                    Ok(request) => handle_mcp_request(&state, request, None)
                         .await
                         .map_err(|error| JsonRpcResponse::err(None, -32000, error.to_string())),
                     Err(error) => Ok(Some(JsonRpcResponse::err(None, -32700, error.to_string()))),
@@ -457,37 +462,63 @@ async fn handle_websocket(mut socket: WebSocket, state: SharedState) {
 async fn handle_mcp_request(
     state: &SharedState,
     request: JsonRpcRequest,
+    accept_language: Option<String>,
 ) -> AppResult<Option<JsonRpcResponse>> {
     let runtime = state.runtime.read().await;
-    process_jsonrpc_request(&runtime, &state.revocations, request).await
+    process_jsonrpc_request(
+        &runtime,
+        &state.revocations,
+        request,
+        accept_language.as_deref(),
+    )
+    .await
 }
 
 async fn process_jsonrpc_request(
     runtime: &AppRuntime,
     revocations: &RevocationRegistry,
     request: JsonRpcRequest,
+    accept_language: Option<&str>,
 ) -> AppResult<Option<JsonRpcResponse>> {
     let id = request.id.clone();
 
     let response = match request.method.as_str() {
-        "initialize" => JsonRpcResponse::ok(
-            id,
-            json!({
-                "protocolVersion": request.params.get("protocolVersion").and_then(|value| value.as_str()).unwrap_or("2025-11-25"),
-                "capabilities": {
-                    "tools": {"listChanged": true},
-                    "streaming": {},
-                    "resources": {}
-                },
-                "serverInfo": {"name": "mcp-prism", "version": env!("CARGO_PKG_VERSION")}
-            }),
-        ),
+        "initialize" => {
+            let providers = runtime.service.provider_catalog();
+            JsonRpcResponse::ok(
+                id,
+                json!({
+                    "protocolVersion": request.params.get("protocolVersion").and_then(|value| value.as_str()).unwrap_or("2025-11-25"),
+                    "capabilities": {
+                        "tools": {"listChanged": true},
+                        "streaming": {},
+                        "resources": {"listChanged": false}
+                    },
+                    "serverInfo": {"name": "mcp-prism", "version": env!("CARGO_PKG_VERSION")},
+                    "instructions": initialize_instructions(&providers, &request.params, accept_language)
+                }),
+            )
+        }
         "notifications/initialized" => return Ok(None),
         "ping" => JsonRpcResponse::ok(id, json!({})),
         "tools/list" => JsonRpcResponse::ok(
             id,
             json!({"tools": tool_definitions(&runtime.service.provider_catalog())}),
         ),
+        "resources/list" => JsonRpcResponse::ok(
+            id,
+            capability_summary_resource_list(&runtime.service.provider_catalog()),
+        ),
+        "resources/read" => {
+            let uri = request
+                .params
+                .get("uri")
+                .and_then(|value| value.as_str())
+                .ok_or_else(|| AppError::Validation("resource uri is required".to_string()))?;
+            let result = capability_summary_resource_read(uri, &runtime.service.provider_catalog())
+                .ok_or_else(|| AppError::Validation(format!("unknown resource: {uri}")))?;
+            JsonRpcResponse::ok(id, result)
+        }
         "tools/call" => {
             let name = request
                 .params
@@ -578,6 +609,13 @@ async fn process_tool_call(
         }
         _ => Err(AppError::Validation(format!("unknown tool: {name}"))),
     }
+}
+
+fn language_hint(headers: &HeaderMap) -> Option<String> {
+    headers
+        .get("accept-language")
+        .and_then(|value| value.to_str().ok())
+        .map(ToOwned::to_owned)
 }
 
 async fn authorize(
@@ -711,5 +749,78 @@ mod tests {
         let body = response.into_body().collect().await.unwrap().to_bytes();
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert!(json["result"]["tools"].as_array().unwrap().len() >= 6);
+    }
+
+    #[tokio::test]
+    async fn initialize_returns_short_instructions() {
+        let app = test_router().await;
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/mcp")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25"}}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        let instructions = json["result"]["instructions"].as_str().unwrap();
+        assert!(instructions.contains("unified_search"));
+        assert!(instructions.len() < 160);
+    }
+
+    #[tokio::test]
+    async fn initialize_supports_zh_and_domain_focus() {
+        let app = test_router().await;
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/mcp")
+                    .header("content-type", "application/json")
+                    .header("accept-language", "zh-CN")
+                    .body(Body::from(
+                        r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","_meta":{"mcpPrism":{"preferredDomain":"coding"}},"clientInfo":{"name":"Cursor","version":"1.0"}}}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        let instructions = json["result"]["instructions"].as_str().unwrap();
+        assert!(instructions.contains("重点能力"));
+        assert!(instructions.contains(crate::mcp::CAPABILITY_SUMMARY_ZH_URI));
+        assert!(instructions.len() < 140);
+    }
+
+    #[tokio::test]
+    async fn capability_summary_resource_is_readable() {
+        let app = test_router().await;
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/mcp")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"jsonrpc":"2.0","id":1,"method":"resources/read","params":{"uri":"mcp-prism://capability-summary"}}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        let text = json["result"]["contents"][0]["text"].as_str().unwrap();
+        assert!(text.contains("MCP Prism Capability Summary"));
     }
 }
