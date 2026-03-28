@@ -64,16 +64,185 @@ Agent (MCP 客户端)
 |------|------|
 | [PRD-mcp-pool-rust-architecture.md](docs/PRD/PRD-mcp-pool-rust-architecture.md) | 愿景、架构、功能/非功能需求、安全与里程碑 |
 | [完整 API 清单](docs/PRD/2026-03-28-07-20-mcp-pool-rust-architecture-generated-complete-api-list.md) | 平台 · 官方文档链接 · 数据类型 · 认证与配额摘要（59 类来源调研底稿） |
+| [部署指南](docs/DEPLOYMENT.md) | 环境变量、代理、缓存、容器化与 MCP 传输说明 |
+| [统一 API 文档](docs/api/unified-search.md) | HTTP / MCP 端点、管理接口、工具列表 |
 
-## 快速开始（1.0 发布后）
+## 配置方式说明
 
-> 以下命令将在首个可执行发行版就绪后与本仓库 `Cargo`/容器镜像对齐；当前阶段以 PRD 与适配器实现为准。
+很多 Node MCP 项目会把服务端配置写进 `config.json`。
 
-1. 在 VPS 上准备环境变量（聚合访问密钥、各下游 Key、可选 Redis）。
-2. 启动 MCP Prism 服务进程（或容器），对外暴露 MCP 传输（如 stdio 由进程管理器托管，或 Streamable HTTP / WebSocket，以最终实现为准）。
-3. 在 Agent 客户端中 **仅添加一个 MCP 服务器**，填入服务端颁发的 **一把** 客户端 Key。
+**MCP Prism 不是这种模式。**
 
-具体安装包、配置项名与默认端口见后续 `docs/DEPLOYMENT.md`（随实现提交）。
+- **Rust 服务端配置**：使用 `.env` / `.env.local` / 系统环境变量
+- **Agent 客户端配置**：仍然用你所使用的 MCP 客户端自己的配置文件
+
+也就是说：
+
+- `mcp-prism` 这个 Rust 服务本身，**不需要**单独的 `config.json`
+- 如果你的 Cursor / Claude Desktop / OpenClaw / 自研 Agent 需要 JSON 配置，那份 JSON 是**客户端自己的 MCP 配置**，作用是告诉客户端去连哪一个 `mcp-prism` 服务
+
+## 快速开始
+
+### 1. 配置服务端
+
+```bash
+cp .env.example .env
+```
+
+最少需要改这些：
+
+```bash
+MCP_PRISM_HMAC_SECRET=replace-me
+MCP_PRISM_ENCRYPTION_KEY=replace-me
+MCP_PRISM_PROXY_MODE=direct
+BRAVE_API_KEY=...
+TAVILY_API_KEY=...
+```
+
+说明：
+
+- 你**不需要**把所有 provider 的 key 都填满
+- 只填你手里真正有的 key 即可
+- 没填的 provider 会自动变成 unavailable，但服务仍然能启动
+
+### 2. 启动服务
+
+本地直接跑：
+
+```bash
+cargo run -- serve
+```
+
+或者容器方式：
+
+```bash
+docker compose up --build
+```
+
+默认监听：
+
+- `http://127.0.0.1:8787`
+
+先确认服务活着：
+
+```bash
+curl http://127.0.0.1:8787/health
+curl http://127.0.0.1:8787/api/v1/providers
+```
+
+### 3. 签发给 Agent 的访问 key
+
+如果你希望另一个 Agent 远程访问你的 MCP Prism，先签发一个 wrapped key：
+
+```bash
+curl -X POST http://127.0.0.1:8787/api/v1/admin/wrapped-keys \
+  -H 'content-type: application/json' \
+  -d '{"client_id":"cursor-prod","ttl_seconds":86400}'
+```
+
+返回结果里的 `token` 就是给 Agent 配的那把聚合 key。
+
+## Agent 接入方式
+
+MCP Prism 当前支持四种传输：
+
+- HTTP JSON-RPC：`POST /mcp`
+- WebSocket：`GET /mcp/ws`
+- SSE：`GET /mcp/sse`
+- stdio：`mcp-prism stdio`
+
+### 场景 A：服务和 Agent 在同一台机器
+
+这种情况下最简单，直接让客户端用 `stdio` 启动：
+
+```bash
+mcp-prism stdio
+```
+
+如果你的 MCP 客户端是 JSON 配置风格，思路通常是：
+
+```json
+{
+  "mcpServers": {
+    "mcp-prism": {
+      "command": "mcp-prism",
+      "args": ["stdio"]
+    }
+  }
+}
+```
+
+这类配置适合同机部署。
+
+### 场景 B：MCP Prism 部署在 VPS，另一个 Agent 远程访问
+
+这种情况下，Agent 不直接启动 Rust 进程，而是配置一个**远程 MCP 地址**。
+
+你需要把客户端指向以下任一入口：
+
+- `https://your-domain.com/mcp`
+- `wss://your-domain.com/mcp/ws`
+- `https://your-domain.com/mcp/sse`
+
+并在请求头里带上：
+
+```text
+Authorization: Bearer <wrapped-key>
+```
+
+如果你的客户端是 JSON 配置风格，通常会长成下面这种形式：
+
+```json
+{
+  "mcpServers": {
+    "mcp-prism-remote": {
+      "transport": "http",
+      "url": "https://your-domain.com/mcp",
+      "headers": {
+        "Authorization": "Bearer <wrapped-key>"
+      }
+    }
+  }
+}
+```
+
+如果客户端支持 WebSocket，也可以改成：
+
+```json
+{
+  "mcpServers": {
+    "mcp-prism-remote": {
+      "transport": "websocket",
+      "url": "wss://your-domain.com/mcp/ws",
+      "headers": {
+        "Authorization": "Bearer <wrapped-key>"
+      }
+    }
+  }
+}
+```
+
+注意：
+
+- 不同客户端字段名可能不完全一样
+- 但核心信息就三样：
+  - 远程 MCP URL
+  - 传输方式
+  - `Authorization: Bearer <wrapped-key>`
+
+## 什么时候用哪种方式
+
+| 场景 | 推荐方式 |
+|------|----------|
+| 本机开发、同机 Agent | `stdio` |
+| 远程 VPS 给多个 Agent 共用 | HTTP / WebSocket |
+| 客户端只支持流式 HTTP | SSE |
+
+## 一句话理解
+
+- **Rust 服务怎么配**：看 `.env`
+- **Agent 怎么连它**：看你的 MCP 客户端配置文件，把地址指向 `/mcp`、`/mcp/ws` 或 `/mcp/sse`
+- **Node 常见的 `config.json` 替代物**：在这个项目里不是服务端配置，而是 Agent 客户端自己的 MCP 连接配置
 
 ## 品牌物料
 
