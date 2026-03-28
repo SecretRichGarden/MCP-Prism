@@ -1,0 +1,64 @@
+# Ralph Progress Log
+Started: 2026-03-28
+---
+
+## Codebase Patterns
+- 配置优先从 `.env` / `.env.local` 和真实环境变量聚合读取，任何单个 provider 都可以独立启用或禁用，不能让缺失密钥阻塞整个服务启动。
+- 路由必须走双线：优先小模型判定，失败后立即退回启发式线性调度，保证 wrapper 与 MCP 工具池始终可用。
+- 代理处理不能假设单一网络环境；所有对外 HTTP 客户端都必须显式支持 `system` / `direct` / `custom` 三种模式，并保留 `no_proxy` 旁路能力。
+
+## 2026-03-28 15:40 - US-001..US-010
+- What was implemented
+  - 初始化 Rust crate，并落地 `AppConfig`、`SearchService`、`DualLineRouter`、`AdapterRegistry`、HTTP API、MCP JSON-RPC 入口。
+  - 完成 P0 provider 模块拆分：Brave、Tavily、智谱、Metaso、PubMed、OpenAlex、高德、FinanceMCP bridge。
+  - 补充 `.env.example`、`docs/api/unified-search.md`、`docs/api/provider-modules.md`、`docs/DEPLOYMENT.md`、`docs/architecture/mvp-design.md`。
+  - 完成 `cargo fmt --check`、`cargo check`、`cargo test`。
+- Files changed
+  - `Cargo.toml`
+  - `src/`
+  - `docs/api/`
+  - `docs/architecture/`
+  - `docs/DEPLOYMENT.md`
+  - `.env.example`
+  - `prd.json`
+  - `.debug/2026-03-28-mcp-prism-phase-1-foundation.md`
+  - `.debug/2026-03-28-mcp-prism-phase-2-implementation.md`
+- Learnings for future iterations
+  - HTTP 远端入口比 stdio 更适合该项目当前 VPS 部署目标；如果后续补 stdio，优先复用现有 MCP handler。
+  - FinanceMCP 适合继续沿 bridge 方向演化，而不是在 Prism 内重写全部金融上游协议。
+  - 公开文档完整度差异很大；Metaso 这类 provider 需要继续保留可配置实验位，而不是在核心路由里硬依赖。
+---
+
+## 2026-03-28 18:25 - US-011..US-018
+- What was implemented
+  - 完成 PRD 差距审计，并新增 `docs/architecture/prd-gap-analysis.md` 作为实现量对照文档。
+  - 补齐传输层：`cargo run -- stdio`、`/mcp/ws`、`/mcp/sse`、`/mcp/message/{session_id}`。
+  - 补齐运维能力：client/provider token bucket 限流、wrapped key revoke/rotate、metrics、weighted experiment 路由。
+  - 补齐缓存层：memory + optional Redis、TTL 分层、prewarm/invalidate API。
+  - 补齐扩展 provider：GitHub REST、GitHub GraphQL、Data.gov、openFDA、Census。
+  - 补齐部署产物：`Dockerfile`、`docker-compose.yml`、`nginx/nginx.conf`、`prometheus/*.yml`。
+- Files changed
+  - `src/cache.rs`
+  - `src/rate_limit.rs`
+  - `src/observability.rs`
+  - `src/server.rs`
+  - `src/service.rs`
+  - `src/router.rs`
+  - `src/mcp.rs`
+  - `src/config.rs`
+  - `src/adapters/`
+  - `.env.example`
+  - `Dockerfile`
+  - `docker-compose.yml`
+  - `nginx/nginx.conf`
+  - `prometheus/prometheus.yml`
+  - `prometheus/alerts.yml`
+  - `docs/api/*`
+  - `docs/architecture/*`
+  - `docs/DEPLOYMENT.md`
+  - `.debug/2026-03-28-mcp-prism-phase-3-full-prd-closeout.md`
+- Learnings for future iterations
+  - 新 transport 不应复制 MCP 业务逻辑；应统一复用同一套 JSON-RPC handler，避免 HTTP / WebSocket / SSE / stdio 行为漂移。
+  - Redis 必须保持 optional；否则会破坏“任何环境都能启动”的部署目标。
+  - 政府和商业 API 的真实联网验收常常受第三方配额、认证和地域网络限制，代码闭环和外部凭据验收要明确区分。
+---

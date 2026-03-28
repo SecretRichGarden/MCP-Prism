@@ -1,0 +1,18 @@
+groups:
+  - name: mcp-prism
+    rules:
+      - alert: MCPPrismSearchErrorSpike
+        expr: increase(mcp_prism_search_errors_total[5m]) > 10
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "MCP Prism search error rate increased"
+      - alert: MCPPrismProviderFailureSpike
+        expr: increase(mcp_prism_provider_failures_total[5m]) > 10
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Provider failures increased"
+

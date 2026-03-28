@@ -1,0 +1,247 @@
+{
+  "project": "MCP Prism Full PRD Closeout",
+  "branchName": "ralph/mcp-prism-mvp",
+  "description": "在 MVP 基础上完成原始 PRD 剩余平台能力闭环：补齐 stdio/WebSocket/SSE、rate limiting、wrapped key revoke/rotate、optional Redis cache、Prometheus metrics、A/B canary 路由、扩展 provider 与容器化部署资产。",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "初始化 Rust 工程与 Ralph 执行产物",
+      "description": "As a maintainer, I want a compilable Rust project scaffold and Ralph artifacts so that the repo can move from PRD-only to executable development.",
+      "acceptanceCriteria": [
+        "Cargo project exists with runnable entrypoint",
+        "prd.json and prd-progress.txt are created and aligned with MVP scope",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": "Manual Ralph-equivalent flow because the working tree is already dirty and amp/jq are unavailable."
+    },
+    {
+      "id": "US-002",
+      "title": "实现 env 聚合配置与可选凭据加载",
+      "description": "As an operator, I want to provide only the API keys I actually have so that MCP Prism can boot and route with any supported subset of providers.",
+      "acceptanceCriteria": [
+        "Supports .env and .env.local loading",
+        "Missing provider keys disable that provider without blocking startup",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": "Covers the UX requirement that users should not have to fill every provider key."
+    },
+    {
+      "id": "US-003",
+      "title": "实现代理自适应 HTTP 客户端与密钥包装能力",
+      "description": "As a deployer, I want proxy-aware outbound networking and wrapped client keys so that the pool runs in both proxied and direct networks with a single auth model.",
+      "acceptanceCriteria": [
+        "Supports system/direct/custom proxy modes with no_proxy matching",
+        "Wrapped API key issue/validate flow works",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "passes": true,
+      "notes": "Proxy behavior must tolerate both local proxy development and direct-access VPS deployments."
+    },
+    {
+      "id": "US-004",
+      "title": "实现双线路由器",
+      "description": "As an operator, I want small-model URL based routing with heuristic fallback so that the wrapper remains available even when the routing model path fails.",
+      "acceptanceCriteria": [
+        "OpenAI-compatible small-model routing path is supported",
+        "Heuristic linear fallback path covers web, academic, finance, maps and general search",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "passes": true,
+      "notes": "Fallback path must not depend on model availability."
+    },
+    {
+      "id": "US-005",
+      "title": "实现统一搜索模型、缓存与适配器注册表",
+      "description": "As a developer, I want a single request/response model and adapter registry so that all providers can plug into one execution pipeline.",
+      "acceptanceCriteria": [
+        "Unified request/response structs exist",
+        "In-memory cache and adapter registry are wired into the search service",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "passes": true,
+      "notes": "Redis remains a later swap-in; MVP uses in-memory caching."
+    },
+    {
+      "id": "US-006",
+      "title": "完成 Web 搜索提供方模块",
+      "description": "As a user, I want Brave, Tavily, Zhipu and Metaso modules so that the pool can cover global search, Chinese search and configurable experimental sources.",
+      "acceptanceCriteria": [
+        "Brave, Tavily and Zhipu providers can build and normalize search responses",
+        "Metaso module exists as configurable experimental adapter",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "passes": true,
+      "notes": "Module split is based on the official endpoint groups documented in docs/PRD."
+    },
+    {
+      "id": "US-007",
+      "title": "完成学术、金融与地图模块",
+      "description": "As a user, I want PubMed, OpenAlex, FinanceMCP and Amap modules so that the pool can answer research, finance and location tasks through the same wrapper.",
+      "acceptanceCriteria": [
+        "PubMed and OpenAlex search modules normalize academic results",
+        "FinanceMCP bridge and Amap operations are implemented",
+        "Typecheck passes"
+      ],
+      "priority": 7,
+      "passes": true,
+      "notes": "FinanceMCP is implemented as an upstream bridge module because its upstream is itself an MCP/HTTP service."
+    },
+    {
+      "id": "US-008",
+      "title": "暴露 HTTP API 与 MCP tools 接口",
+      "description": "As an MCP client, I want HTTP and MCP-compatible tool endpoints so that I can call the pool through a single remote entrypoint.",
+      "acceptanceCriteria": [
+        "HTTP search and provider endpoints exist",
+        "MCP initialize/tools/list/tools/call are supported over JSON-RPC HTTP",
+        "Typecheck passes"
+      ],
+      "priority": 8,
+      "passes": true,
+      "notes": "HTTP is the first-class remote transport for VPS deployment."
+    },
+    {
+      "id": "US-009",
+      "title": "同步 API、部署与环境文档",
+      "description": "As a new maintainer, I want zero-to-deploy documentation so that I can configure keys, proxies and deployment without reading source code.",
+      "acceptanceCriteria": [
+        "API docs exist under docs/api",
+        "Deployment and env example docs exist",
+        "Typecheck passes"
+      ],
+      "priority": 9,
+      "passes": true,
+      "notes": "Docs must explain proxy-on and proxy-off deployments."
+    },
+    {
+      "id": "US-010",
+      "title": "补齐测试与 .debug 进度记录",
+      "description": "As a collaborator, I want tests and progress logs so that each completed phase leaves behind reusable engineering context.",
+      "acceptanceCriteria": [
+        "Unit or integration tests cover routing, auth, proxy matching and API surface",
+        ".debug and prd-progress.txt are updated with learnings",
+        "Typecheck passes"
+      ],
+      "priority": 10,
+      "passes": true,
+      "notes": "Every phase must leave a trace in .debug as requested."
+    },
+    {
+      "id": "US-011",
+      "title": "完成 PRD 差距审计与剩余 Story 重拆分",
+      "description": "As a maintainer, I want a PRD-to-code gap analysis so that the remaining implementation work is tracked against the original architecture rather than only the MVP scaffold.",
+      "acceptanceCriteria": [
+        "Gap analysis document exists under docs/architecture",
+        "Remaining work is reflected in prd.json and progress logs",
+        "Typecheck passes"
+      ],
+      "priority": 11,
+      "passes": true,
+      "notes": "Manual Ralph-equivalent execution continues because amp/jq are unavailable in the current environment."
+    },
+    {
+      "id": "US-012",
+      "title": "补齐 MCP 传输层",
+      "description": "As an MCP client, I want stdio, WebSocket and SSE transports so that Prism can run in both local and VPS-oriented remote integration modes.",
+      "acceptanceCriteria": [
+        "Stdio command is available",
+        "WebSocket and SSE transport endpoints exist",
+        "Typecheck passes"
+      ],
+      "priority": 12,
+      "passes": true,
+      "notes": "HTTP JSON-RPC remains supported alongside the added transports."
+    },
+    {
+      "id": "US-013",
+      "title": "补齐鉴权运维能力",
+      "description": "As an operator, I want wrapped key revoke and rotate plus client and provider rate limiting so that remote access can be controlled safely in production.",
+      "acceptanceCriteria": [
+        "Wrapped key revoke endpoint exists",
+        "Wrapped key rotate endpoint exists",
+        "Client and provider rate limiting are enforced",
+        "Typecheck passes"
+      ],
+      "priority": 13,
+      "passes": true,
+      "notes": "Revocation is in-memory and immediate; suitable for a single-instance deployment target."
+    },
+    {
+      "id": "US-014",
+      "title": "补齐缓存层",
+      "description": "As an operator, I want optional Redis cache, TTL by query type, prewarm and invalidate APIs so that Prism can reduce repeated upstream calls under production traffic.",
+      "acceptanceCriteria": [
+        "Memory plus optional Redis cache are available",
+        "TTL varies by search type",
+        "Prewarm and invalidate APIs exist",
+        "Typecheck passes"
+      ],
+      "priority": 14,
+      "passes": true,
+      "notes": "The cache remains optional so direct deployments without Redis still boot cleanly."
+    },
+    {
+      "id": "US-015",
+      "title": "补齐可观测性与灰度路由",
+      "description": "As an operator, I want Prometheus metrics and weighted experiment routing so that I can observe traffic and canary provider strategies safely.",
+      "acceptanceCriteria": [
+        "Metrics endpoint exists",
+        "Prometheus alert sample files exist",
+        "Weighted experiment routing is configurable through env",
+        "Typecheck passes"
+      ],
+      "priority": 15,
+      "passes": true,
+      "notes": "OTLP/Jaeger exporter remains an optional future enhancement; metrics and structured logs are in place."
+    },
+    {
+      "id": "US-016",
+      "title": "补齐商业与政府扩展 provider",
+      "description": "As a user, I want GitHub, Data.gov, openFDA and Census adapters so that Prism can cover more of the original PRD's Phase 4 scope with public APIs.",
+      "acceptanceCriteria": [
+        "GitHub REST and GraphQL adapters exist",
+        "Data.gov, openFDA and Census adapters exist",
+        "Dynamic tool discovery exposes available provider search tools",
+        "Typecheck passes"
+      ],
+      "priority": 16,
+      "passes": true,
+      "notes": "Paid or partner-only providers still require real external credentials for live verification."
+    },
+    {
+      "id": "US-017",
+      "title": "补齐生产部署资产",
+      "description": "As a deployer, I want Docker, Compose, Nginx and Prometheus files so that the service can be stood up on a VPS directly from the repository.",
+      "acceptanceCriteria": [
+        "Dockerfile exists",
+        "docker-compose.yml exists",
+        "nginx and prometheus configs exist",
+        "Typecheck passes"
+      ],
+      "priority": 17,
+      "passes": true,
+      "notes": "Deployment assets cover proxy-on and proxy-off environments."
+    },
+    {
+      "id": "US-018",
+      "title": "同步 Full PRD 文档与阶段记录",
+      "description": "As a collaborator, I want the updated API, deployment and architecture docs plus .debug logs so that the repo state matches the expanded implementation.",
+      "acceptanceCriteria": [
+        "API docs mention the new transports and admin endpoints",
+        "Deployment docs mention Redis, Prometheus and Docker artifacts",
+        ".debug and prd-progress.txt include the closeout phase",
+        "Typecheck passes"
+      ],
+      "priority": 18,
+      "passes": true,
+      "notes": "Documentation now tracks the codebase beyond the initial MVP."
+    }
+  ]
+}
