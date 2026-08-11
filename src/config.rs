@@ -541,6 +541,7 @@ impl ProviderConfig {
         .unwrap_or(true);
         let extra_identity = match id {
             "openalex" => env_first(&["OPENALEX_EMAIL"]),
+            "pubmed" => env_first(&["NCBI_EMAIL", "PUBMED_EMAIL"]),
             _ => None,
         };
         let rpm = env_parse(&[&format!(

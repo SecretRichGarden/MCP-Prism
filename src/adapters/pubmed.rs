@@ -54,6 +54,10 @@ impl ProviderAdapter for PubMedAdapter {
                 ("retmode", "json"),
                 ("retmax", &request.options.normalized_limit().to_string()),
             ]);
+            // NCBI E-utilities 最佳实践: tool + email 标识调用方 (email 配 key 后限流更稳)
+            if let Some(email) = self.config.extra_identity.as_deref() {
+                search_builder = search_builder.query(&[("email", email), ("tool", "kairos-mcp-hub")]);
+            }
             if let Some(api_key) = self.config.api_key.as_ref() {
                 search_builder = search_builder.query(&[("api_key", api_key.expose_secret())]);
             }
@@ -69,6 +73,9 @@ impl ProviderAdapter for PubMedAdapter {
                 ("retmode", "json"),
                 ("id", &ids.join(",")),
             ]);
+            if let Some(email) = self.config.extra_identity.as_deref() {
+                summary_builder = summary_builder.query(&[("email", email), ("tool", "kairos-mcp-hub")]);
+            }
             if let Some(api_key) = self.config.api_key.as_ref() {
                 summary_builder = summary_builder.query(&[("api_key", api_key.expose_secret())]);
             }
