@@ -54,7 +54,27 @@ fn heuristic_plan(
     experiments: &[RoutingExperiment],
 ) -> RoutingDecision {
     let search_type = if request.search_type == SearchType::Auto {
-        classify_query(&request.query)
+        // 带 provider_hints 时优先从 hint provider 的 capabilities 推断 search_type,
+        // 避免 classify_query 对领域 query(如生物医学 "gastric cancer")判错类型,
+        // 导致 hint provider(如 pubmed/openalex 仅 supports Academic)无法被 resolve。
+        let hinted_types = registry
+            .catalog()
+            .into_iter()
+            .filter(|provider| provider.available)
+            .filter(|provider| {
+                request
+                    .options
+                    .provider_hints
+                    .iter()
+                    .any(|hint| hint == &provider.id)
+            })
+            .flat_map(|provider| provider.capabilities.into_iter())
+            .collect::<Vec<_>>();
+        if let Some(first) = hinted_types.first() {
+            first.clone()
+        } else {
+            classify_query(&request.query)
+        }
     } else {
         request.search_type.clone()
     };
