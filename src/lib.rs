@@ -11,6 +11,7 @@ pub mod rate_limit;
 pub mod router;
 pub mod server;
 pub mod service;
+pub mod stdio_client;
 
 pub use config::AppConfig;
 pub use error::{AppError, AppResult};

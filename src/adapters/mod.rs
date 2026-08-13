@@ -9,6 +9,7 @@ mod metaso;
 mod openalex;
 mod openfda;
 mod pubmed;
+mod stdio;
 mod tavily;
 mod zhipu;
 
@@ -37,6 +38,7 @@ pub use metaso::MetasoAdapter;
 pub use openalex::OpenAlexAdapter;
 pub use openfda::OpenFdaAdapter;
 pub use pubmed::PubMedAdapter;
+pub use stdio::StdioMcpRegistry;
 pub use tavily::TavilyAdapter;
 pub use zhipu::ZhipuAdapter;
 

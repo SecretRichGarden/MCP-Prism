@@ -1,4 +1,4 @@
-use std::{env, fmt, str::FromStr};
+use std::{collections::HashMap, env, fmt, str::FromStr};
 
 use secrecy::SecretString;
 use serde::{Deserialize, Serialize};
@@ -18,6 +18,8 @@ pub struct AppConfig {
     pub rate_limit: RateLimitConfig,
     pub observability: ObservabilityConfig,
     pub providers: ProviderConfigs,
+    /// 配置驱动的 stdio 型 MCP provider（从 stdio_providers.json 加载，无需重编译即可增删）
+    pub stdio_providers: Vec<StdioProviderConfig>,
     pub log_format: LogFormat,
 }
 
@@ -35,12 +37,20 @@ impl AppConfig {
             rate_limit: RateLimitConfig::from_env(),
             observability: ObservabilityConfig::from_env(),
             providers: ProviderConfigs::from_env(),
+            stdio_providers: StdioProviderConfig::load_all(),
             log_format: LogFormat::from_env(),
         })
     }
 
     pub fn provider_catalog(&self) -> Vec<ProviderCatalogEntry> {
-        self.providers.catalog()
+        let mut catalog = self.providers.catalog();
+        catalog.extend(
+            self.stdio_providers
+                .iter()
+                .filter(|provider| provider.is_available())
+                .map(StdioProviderConfig::catalog_entry),
+        );
+        catalog
     }
 
     pub fn routing_mode_label(&self) -> String {
@@ -608,6 +618,108 @@ impl LogFormat {
         {
             "json" => Self::Json,
             _ => Self::Pretty,
+        }
+    }
+}
+
+/// 配置驱动的 stdio 型 MCP provider。
+///
+/// 从 JSON 文件加载（`MCP_PRISM_STDIO_PROVIDERS_FILE`，默认 `config/prism/stdio_providers.json`）。
+/// 新增/移除 stdio MCP 只需编辑该文件 + 重启 prism，无需重编译。
+/// `search_capable=true` 的 provider 接入 `unified_search`（supports/execute 映射搜索）；
+/// `search_capable=false` 的 provider 仅做**工具透传**（tools/list 聚合 + tools/call 转发）。
+#[derive(Debug, Clone, Deserialize)]
+pub struct StdioProviderConfig {
+    pub id: String,
+    pub title: String,
+    pub category: String,
+    /// 子进程命令（如 `node`、`python3`）
+    pub command: String,
+    #[serde(default)]
+    pub args: Vec<String>,
+    #[serde(default)]
+    pub env: HashMap<String, String>,
+    #[serde(default)]
+    pub cwd: Option<String>,
+    #[serde(default = "default_enabled")]
+    pub enabled: bool,
+    /// 是否接入 unified_search（搜索型 stdio MCP）
+    #[serde(default)]
+    pub search_capable: bool,
+    /// 搜索型时声明支持的 SearchType（web/news/academic/finance/...）
+    #[serde(default)]
+    pub search_types: Vec<String>,
+    #[serde(default = "default_rpm")]
+    pub rpm: f64,
+}
+
+fn default_enabled() -> bool {
+    true
+}
+
+fn default_rpm() -> f64 {
+    30.0
+}
+
+impl StdioProviderConfig {
+    /// 从 JSON 文件加载（兼容顶层为数组 或 `{"providers":[...]}` 两种格式）。
+    pub fn load_all() -> Vec<Self> {
+        let path = env_first(&["MCP_PRISM_STDIO_PROVIDERS_FILE"])
+            .unwrap_or_else(|| "config/prism/stdio_providers.json".to_string());
+        let content = match std::fs::read_to_string(&path) {
+            Ok(content) => content,
+            Err(_) => return vec![],
+        };
+        if let Ok(list) = serde_json::from_str::<Vec<Self>>(&content) {
+            return list;
+        }
+        #[derive(Deserialize)]
+        struct Wrapper {
+            #[serde(default)]
+            providers: Vec<StdioProviderConfig>,
+        }
+        match serde_json::from_str::<Wrapper>(&content) {
+            Ok(wrapper) => wrapper.providers,
+            Err(error) => {
+                tracing::warn!(
+                    "stdio_providers parse error at {path}: {error}; falling back to empty list"
+                );
+                vec![]
+            }
+        }
+    }
+
+    pub fn is_available(&self) -> bool {
+        self.enabled
+    }
+
+    pub fn capabilities(&self) -> Vec<SearchType> {
+        self.search_types
+            .iter()
+            .filter_map(|value| match value.as_str() {
+                "web" => Some(SearchType::Web),
+                "news" => Some(SearchType::News),
+                "academic" => Some(SearchType::Academic),
+                "finance" => Some(SearchType::Finance),
+                "company" => Some(SearchType::Company),
+                "patent" => Some(SearchType::Patent),
+                "government" => Some(SearchType::Government),
+                "maps" => Some(SearchType::Maps),
+                _ => None,
+            })
+            .collect()
+    }
+
+    pub fn catalog_entry(&self) -> ProviderCatalogEntry {
+        ProviderCatalogEntry {
+            id: self.id.clone(),
+            title: self.title.clone(),
+            category: self.category.clone(),
+            available: self.is_available(),
+            base_url: None,
+            capabilities: self.capabilities(),
+            requires_api_key: false,
+            notes: Some(format!("stdio MCP: {}", self.command)),
         }
     }
 }

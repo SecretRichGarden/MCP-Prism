@@ -23,6 +23,7 @@ use tokio::{
 use tokio_stream::wrappers::ReceiverStream;
 
 use crate::{
+    adapters::StdioMcpRegistry,
     auth::{RevocationRegistry, SecretCipher, WrappedApiKeyClaims, WrappedApiKeyService},
     config::AppConfig,
     error::{AppError, AppResult},
@@ -41,6 +42,8 @@ pub struct AppRuntime {
     pub wrapped_keys: WrappedApiKeyService,
     #[allow(dead_code)]
     pub secret_cipher: SecretCipher,
+    /// stdio 型 MCP provider 聚合（透传工具），由 from_config 后 `init` 异步拉起。
+    pub stdio: StdioMcpRegistry,
 }
 
 impl AppRuntime {
@@ -49,6 +52,7 @@ impl AppRuntime {
             service: SearchService::new(&config)?,
             wrapped_keys: WrappedApiKeyService::new(config.auth.hmac_secret.clone()),
             secret_cipher: SecretCipher::new(&config.auth.encryption_key),
+            stdio: StdioMcpRegistry::empty(),
             config,
         })
     }
@@ -97,7 +101,9 @@ pub async fn serve(config: AppConfig) -> AppResult<()> {
     let addr = format!("{}:{}", config.server.host, config.server.port)
         .parse::<SocketAddr>()
         .map_err(|err| AppError::Config(err.to_string()))?;
-    let runtime: SharedRuntime = Arc::new(RwLock::new(AppRuntime::from_config(config.clone())?));
+    let app_runtime = AppRuntime::from_config(config.clone())?;
+    app_runtime.stdio.init(&config).await; // 拉起 stdio 型 MCP provider（透传工具）
+    let runtime: SharedRuntime = Arc::new(RwLock::new(app_runtime));
     let state = Arc::new(AppState {
         runtime,
         revocations: Arc::new(RevocationRegistry::new()),
@@ -118,7 +124,8 @@ pub async fn run_stdio(mut config: AppConfig) -> AppResult<()> {
     if config.auth.trust_stdio_transport {
         config.auth.require_client_key = false;
     }
-    let runtime = AppRuntime::from_config(config)?;
+    let runtime = AppRuntime::from_config(config.clone())?;
+    runtime.stdio.init(&config).await; // 拉起 stdio 型 MCP provider（透传工具）
     let revocations = RevocationRegistry::new();
     let stdin = BufReader::new(tokio::io::stdin());
     let mut lines = stdin.lines();
@@ -501,10 +508,13 @@ async fn process_jsonrpc_request(
         }
         "notifications/initialized" => return Ok(None),
         "ping" => JsonRpcResponse::ok(id, json!({})),
-        "tools/list" => JsonRpcResponse::ok(
-            id,
-            json!({"tools": tool_definitions(&runtime.service.provider_catalog())}),
-        ),
+        "tools/list" => {
+            let mut tools = tool_definitions(&runtime.service.provider_catalog());
+            if let Some(array) = tools.as_array_mut() {
+                array.extend(runtime.stdio.tool_definitions().await);
+            }
+            JsonRpcResponse::ok(id, json!({"tools": tools}))
+        }
         "resources/list" => JsonRpcResponse::ok(
             id,
             capability_summary_resource_list(&runtime.service.provider_catalog()),
@@ -606,6 +616,10 @@ async fn process_tool_call(
             Ok(serde_json::to_value(
                 runtime.service.search(search_request).await?,
             )?)
+        }
+        _ if runtime.stdio.has_tool(name).await => {
+            // stdio 型 MCP 工具透传：{provider_id}__{tool_name} → 子进程
+            runtime.stdio.call_tool(name, arguments).await
         }
         _ => Err(AppError::Validation(format!("unknown tool: {name}"))),
     }
