@@ -570,7 +570,14 @@ async fn process_tool_call(
                 runtime.service.search(search_request).await?,
             )?)
         }
-        "provider_catalog" => Ok(serde_json::to_value(runtime.service.provider_catalog())?),
+        "provider_catalog" => {
+            // MCP structuredContent 必须是对象（规范要求），裸数组会被 mcporter 等严格客户端判为格式错误
+            let catalog = runtime.service.provider_catalog();
+            Ok(json!({
+                "providers": catalog,
+                "total": catalog.len()
+            }))
+        }
         "issue_wrapped_key" => {
             let payload = serde_json::from_value::<IssueWrappedKeyInput>(arguments)?;
             let token = runtime.wrapped_keys.issue(
